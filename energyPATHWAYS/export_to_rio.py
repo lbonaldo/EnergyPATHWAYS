@@ -20,22 +20,25 @@ from energyPATHWAYS.unit_converter import UnitConverter
 import click
 import datetime as DT
 
-class RioExport(object):
+class Export(object):
     def __init__(self, model):
         self.model = model
         self.demand = model.demand
         self.scenario = model.scenario_id
         self.base_path = os.path.join(cfg.workingdir, self.scenario, 'EP2RIO')
+        self.base_path_macro = os.path.join(cfg.workingdir, self.scenario, 'EP2MACRO')
+        
         logging.info(self.base_path)
         self.scenario_index = 0
 
     def write_all(self):
-        self.write_demand_shapes()
-        self.write_demand_subsector()
-        self.write_demand_side_levelized_costs()
-        self.write_exo_demand()
-
-
+        if cfg.export_to_macro:
+            self.write_demand_shapes_macro_format()
+        if cfg.export_to_rio:
+            self.write_demand_shapes()
+            self.write_demand_subsector()
+            self.write_demand_side_levelized_costs()
+            self.write_exo_demand()
 
     def write_demand_side_levelized_costs(self):
         logging.info('EP2RIO: Writing demand-side levelized cost')
@@ -194,6 +197,131 @@ class RioExport(object):
                 pdb.set_trace()
 
         Output.write(pd.DataFrame(shape_meta[1:], columns=shape_meta[0]), 'SHAPE_META.csv', self.base_path, compression='gzip', index=False, lower_case=True)
+
+    def write_demand_shapes_macro_format(self):
+        logging.info('EP2MACRO: Writing demand-side shapes in Macro format')
+        
+        # Create shape metadata similar to original function
+        shape_meta = [['name','shape_type','input_type','shape_unit_type','time_zone','geography','geography_map_key','interpolation_method','extrapolation_method','is_active']]
+        
+        # Create summary metadata DataFrame
+        summary_metadata_rows = []
+    
+        final_energy_shapes = cfg.ep2rio_final_energy_shapes + [cfg.electricity_energy_type]
+        
+        for final_energy in set(final_energy_shapes):
+            path = os.path.join(self.base_path_macro, 'ShapeData', final_energy + '.csvd')
+            allocate_to_feeder = True if final_energy == cfg.electricity_energy_type else False
+            
+            written_years = []
+
+            for year in cfg.rio_years:
+                # Get the original data
+                df = self.demand.aggregate_final_energy_shapes(
+                    year, final_energy, 
+                    reconciliation_step=False, 
+                    allocate_to_feeder=allocate_to_feeder, 
+                    exclude_subsectors=cfg.rio_optimizable_subsectors
+                )
+                
+                if df is None:
+                    continue
+                    
+                # Clean the dataframe
+                df.index = df.index.rename('gau', level=GeoMapper.demand_primary_geography)
+                df = Output.clean_rio_df(df)
+                df['value'] = df['value'].clip(0.01, None).round(2)
+                
+                # Convert to wide format and get metadata
+                df_wide, metadata_rows = self.convert_to_macro_format(df, year, final_energy)
+                
+                written_years.append(year)
+                
+                # Add to summary metadata (extend the list with all rows)
+                summary_metadata_rows.extend(metadata_rows)
+                
+                # Write time series data
+                file_name = '{}_{}_{}.csv'.format(final_energy, year, self.scenario)
+                Output.write(df_wide, file_name, path, compression=None, index=True, lower_case=True)
+                
+                
+            if len(written_years):
+                # Add to shape metadata using the same format as original
+                shape_meta.append(self.format_shape_meta_row(final_energy))
+
+        # Write the shape metadata file (same as original)
+        Output.write(pd.DataFrame(shape_meta[1:], columns=shape_meta[0]), 'SHAPE_META.csv', self.base_path_macro, compression='gzip', index=False, lower_case=True)
+
+        # Write the summary metadata file
+        if summary_metadata_rows:
+            summary_df = pd.DataFrame(summary_metadata_rows)
+            Output.write(summary_df, 'SHAPE_SUMMARY_METADATA.csv', self.base_path_macro, compression=None, index=False, lower_case=True)
+
+    def convert_to_macro_format(self, df, year, energy_type):
+        """
+        Convert to wide format and extract summary metadata in tidy format
+        """
+        # Reset index to get all columns as regular columns
+        df_reset = df.reset_index()
+        
+        # Verify weather_datetime column exists
+        if 'weather_datetime' not in df_reset.columns:
+            raise ValueError("weather_datetime column not found in the dataframe")
+        
+        # Create time_index mapping
+        unique_timestamps = df_reset['weather_datetime'].unique()
+        timestamp_to_index = {timestamp: idx + 1 for idx, timestamp in enumerate(sorted(unique_timestamps))}
+        df_reset['time_index'] = df_reset['weather_datetime'].map(timestamp_to_index)
+        
+        # Identify metadata columns (only the ones we want to keep)
+        desired_metadata_columns = ['sector', 'subsector']
+        available_metadata_columns = [col for col in desired_metadata_columns if col in df_reset.columns]
+        
+        # Pivot to wide format (time series only)
+        df_wide = df_reset.pivot_table(
+            index='time_index',
+            columns='gau',
+            values='value',
+            aggfunc='sum'
+        )
+        
+        # Fill missing values
+        df_wide = df_wide.fillna(0)
+        
+        # Create summary metadata in tidy format with expanded regions
+        metadata_rows = []
+        regions = list(df_reset['gau'].unique())
+        
+        # Get unique combinations of metadata
+        if available_metadata_columns:
+            metadata_combinations = df_reset[available_metadata_columns].drop_duplicates()
+            
+            for _, row in metadata_combinations.iterrows():
+                # Create one row per region
+                for region in regions:
+                    metadata_row = {
+                        'year': year,
+                        'final_energy': energy_type,
+                        'scenario': self.scenario,
+                        'region': region
+                    }
+                    
+                    # Add each desired metadata column
+                    for col in available_metadata_columns:
+                        metadata_row[col] = row[col]
+                    
+                    metadata_rows.append(metadata_row)
+        else:
+            # If no metadata columns, create one row per region
+            for region in regions:
+                metadata_rows.append({
+                    'year': year,
+                    'final_energy': energy_type,
+                    'scenario': self.scenario,
+                    'region': region
+                })
+        
+        return df_wide, metadata_rows
 
     def write_demand_subsector(self):
         logging.info('EP2RIO: Writing demand-side technology inputs')
