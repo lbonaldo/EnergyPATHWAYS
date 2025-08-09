@@ -54,7 +54,7 @@ class PathwaysModel(object):
 
         if self.demand_solved and export_results:
             self.demand.aggregate_results()
-            export = ep2rio.RioExport(self)
+            export = ep2rio.Export(self)
             export.write_all()
             self.export_result_to_csv()
 

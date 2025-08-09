@@ -30,6 +30,8 @@ rio_standard_mass_unit = None
 rio_standard_distance_unit = None
 rio_standard_volume_unit = None
 rio_years = None
+export_to_rio = None
+export_to_macro = None
 
 # pickle names
 demand_model_append_name = '_demand_model.p'
@@ -161,7 +163,7 @@ def table_dict(table_name, columns=['id', 'name'], append=False,
 
 def init_output_parameters():
     global currency_name, output_currency, rio_standard_energy_unit, rio_standard_mass_unit, rio_standard_distance_unit, rio_standard_volume_unit, \
-       rio_years, active_subsectors, rio_flex_load_subsectors, rio_optimizable_subsectors, ep2rio_final_energy_shapes
+       rio_years, active_subsectors, rio_flex_load_subsectors, rio_optimizable_subsectors, ep2rio_final_energy_shapes, export_to_macro
 
     currency_name = getParam('currency_name', section='UNITS')
     output_currency = getParam('currency_year', section='UNITS') + ' ' + currency_name
@@ -174,6 +176,8 @@ def init_output_parameters():
     rio_standard_volume_unit = getParam('rio_standard_volume_unit', section='RIO')
     rio_standard_distance_unit = getParam('rio_standard_distance_unit', section='RIO')
     rio_years = sorted([int(y) for y in getParam('rio_years', section='RIO').split(',')])
+    export_to_rio = getParam('export_to_rio', section='RIO')
+    export_to_macro = getParam('export_to_macro', section='MACRO')
     init_removed_levels()
     init_output_levels()
 
