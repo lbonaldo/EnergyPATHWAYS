@@ -22,6 +22,8 @@ warnings.simplefilter("ignore")
 # core inputs
 workingdir = None
 active_subsectors = None
+
+## RIO
 ep2rio_final_energy_shapes = None
 rio_flex_load_subsectors = None
 rio_optimizable_subsectors = None
@@ -31,6 +33,16 @@ rio_standard_distance_unit = None
 rio_standard_volume_unit = None
 rio_years = None
 export_to_rio = None
+
+## MACRO
+ep2macro_final_energy_shapes = None
+macro_flex_load_subsectors = None
+macro_optimizable_subsectors = None
+macro_standard_energy_unit = None
+macro_standard_mass_unit = None
+macro_standard_distance_unit = None
+macro_standard_volume_unit = None
+macro_years = None
 export_to_macro = None
 
 # pickle names
@@ -163,10 +175,13 @@ def table_dict(table_name, columns=['id', 'name'], append=False,
 
 def init_output_parameters():
     global currency_name, output_currency, rio_standard_energy_unit, rio_standard_mass_unit, rio_standard_distance_unit, rio_standard_volume_unit, \
-       rio_years, active_subsectors, rio_flex_load_subsectors, rio_optimizable_subsectors, ep2rio_final_energy_shapes, export_to_macro
+       rio_years, active_subsectors, rio_flex_load_subsectors, rio_optimizable_subsectors, export_to_rio, ep2rio_final_energy_shapes, macro_flex_load_subsectors, \
+       macro_optimizable_subsectors, macro_standard_energy_unit, macro_standard_mass_unit, macro_standard_distance_unit, macro_standard_volume_unit, macro_years, \
+       export_to_macro, ep2macro_final_energy_shapes
 
     currency_name = getParam('currency_name', section='UNITS')
     output_currency = getParam('currency_year', section='UNITS') + ' ' + currency_name
+    # RIO
     active_subsectors = [g.strip() for g in getParam('active_subsectors', section='RIO').split('||') if len(g)]
     ep2rio_final_energy_shapes = [g.strip() for g in getParam('ep2rio_final_energy_shapes', section='RIO').split(',') if len(g)]
     rio_flex_load_subsectors = [g.strip() for g in getParam('rio_flex_load_subsectors', section='RIO').split('||') if len(g)]
@@ -176,8 +191,24 @@ def init_output_parameters():
     rio_standard_volume_unit = getParam('rio_standard_volume_unit', section='RIO')
     rio_standard_distance_unit = getParam('rio_standard_distance_unit', section='RIO')
     rio_years = sorted([int(y) for y in getParam('rio_years', section='RIO').split(',')])
-    export_to_rio = getParam('export_to_rio', section='RIO')
-    export_to_macro = getParam('export_to_macro', section='MACRO')
+    export_to_rio = getParamAsBoolean('export_to_rio', section='RIO')
+    # MACRO
+    active_subsectors = [g.strip() for g in getParam('active_subsectors', section='MACRO').split('||') if len(g)]
+    ep2macro_final_energy_shapes = [g.strip() for g in getParam('ep2macro_final_energy_shapes', section='MACRO').split(',') if len(g)]
+    macro_flex_load_subsectors = [g.strip() for g in getParam('macro_flex_load_subsectors', section='MACRO').split('||') if len(g)]
+    macro_optimizable_subsectors = [g.strip() for g in getParam('macro_optimizable_subsectors', section='MACRO').split('||') if len(g)]
+    macro_standard_energy_unit = getParam('macro_standard_energy_unit', section='MACRO')
+    macro_standard_mass_unit = getParam('macro_standard_mass_unit', section='MACRO')
+    macro_standard_distance_unit = getParam('macro_standard_distance_unit', section='MACRO')
+    macro_standard_volume_unit = getParam('macro_standard_volume_unit', section='MACRO')
+    macro_years = sorted([int(y) for y in getParam('macro_years', section='MACRO').split(',')])
+    export_to_macro = getParamAsBoolean('export_to_macro', section='MACRO')
+    # validate export (we currently only support one of the two per run)
+    if export_to_macro and export_to_rio:
+        raise PathwaysException('Only one of export_to_macro or export_to_rio can be true in the config file')
+    if not export_to_macro and not export_to_rio:
+        raise PathwaysException('One of export_to_macro or export_to_rio must be true in the config file')
+    
     init_removed_levels()
     init_output_levels()
 
