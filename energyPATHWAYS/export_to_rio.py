@@ -206,22 +206,23 @@ class Export(object):
         
         # Create summary metadata DataFrame
         summary_metadata_rows = []
-    
-        final_energy_shapes = cfg.ep2rio_final_energy_shapes + [cfg.electricity_energy_type]
+        
+        # FIRST LOOP: Final energy shapes
+        final_energy_shapes = cfg.ep2macro_final_energy_shapes + [cfg.electricity_energy_type]
         
         for final_energy in set(final_energy_shapes):
-            path = os.path.join(self.base_path_macro, 'ShapeData', final_energy + '.csvd')
+            path = os.path.join(self.base_path_macro, 'ShapeData', 'final_energy', final_energy + '.csvd')
             allocate_to_feeder = True if final_energy == cfg.electricity_energy_type else False
             
             written_years = []
 
-            for year in cfg.rio_years:
-                # Get the original data
+            for year in cfg.macro_years:
+                # Get aggregate demand across all subsectors
                 df = self.demand.aggregate_final_energy_shapes(
                     year, final_energy, 
                     reconciliation_step=False, 
                     allocate_to_feeder=allocate_to_feeder, 
-                    exclude_subsectors=cfg.rio_optimizable_subsectors
+                    exclude_subsectors=cfg.macro_optimizable_subsectors
                 )
                 
                 if df is None:
@@ -233,7 +234,7 @@ class Export(object):
                 df['value'] = df['value'].clip(0.01, None).round(2)
                 
                 # Convert to wide format and get metadata
-                df_wide, metadata_rows = self.convert_to_macro_format(df, year, final_energy)
+                df_wide, metadata_rows = self.convert_to_macro_format(df, year, 'final_energy', final_energy)
                 
                 written_years.append(year)
                 
@@ -243,7 +244,6 @@ class Export(object):
                 # Write time series data
                 file_name = '{}_{}_{}.csv'.format(final_energy, year, self.scenario)
                 Output.write(df_wide, file_name, path, compression=None, index=True, lower_case=True)
-                
                 
             if len(written_years):
                 # Add to shape metadata using the same format as original
@@ -257,7 +257,38 @@ class Export(object):
             summary_df = pd.DataFrame(summary_metadata_rows)
             Output.write(summary_df, 'SHAPE_SUMMARY_METADATA.csv', self.base_path_macro, compression=None, index=False, lower_case=True)
 
-    def convert_to_macro_format(self, df, year, energy_type):
+        # SECOND LOOP: Individual subsector shapes
+        for subsector_name in set(cfg.macro_optimizable_subsectors + cfg.macro_flex_load_subsectors):
+            path = os.path.join(self.base_path_macro, 'ShapeData', 'subsectors', subsector_name + '.csvd')
+            sector_name = [sector.name for sector in self.demand.sectors.values() if subsector_name in sector.subsectors][0]
+            
+            written_years = []
+            
+            for year in cfg.macro_years:
+                # Get individual subsector demand
+                df = self.demand.sectors[sector_name].subsectors[subsector_name].aggregate_subsector_final_energy_shape(
+                    year, cfg.electricity_energy_type, allocate_to_feeder=True
+                )
+                
+                if df is None:
+                    continue
+                    
+                # Clean the dataframe
+                df.index = df.index.rename('gau', level=GeoMapper.demand_primary_geography)
+                df = Output.clean_rio_df(df)
+                df['value'] = df['value'].clip(0.01, None).round(2)
+                
+                # Convert to wide format and get metadata
+                df_wide, _ = self.convert_to_macro_format(df, year, 'subsector', subsector_name)
+                
+                written_years.append(year)
+
+                # Write time series data
+                file_name = '{}_{}_{}.csv'.format(subsector_name, year, self.scenario)
+                Output.write(df_wide, file_name, path, compression=None, index=True, lower_case=True)
+
+
+    def convert_to_macro_format(self, df, year, identifier_key, identifier_value):
         """
         Convert to wide format and extract summary metadata in tidy format
         """
@@ -301,7 +332,7 @@ class Export(object):
                 for region in regions:
                     metadata_row = {
                         'year': year,
-                        'final_energy': energy_type,
+                        identifier_key: identifier_value,
                         'scenario': self.scenario,
                         'region': region
                     }
@@ -316,7 +347,7 @@ class Export(object):
             for region in regions:
                 metadata_rows.append({
                     'year': year,
-                    'final_energy': energy_type,
+                    identifier_key: identifier_value,
                     'scenario': self.scenario,
                     'region': region
                 })
