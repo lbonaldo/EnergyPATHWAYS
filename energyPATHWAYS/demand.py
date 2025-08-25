@@ -14,6 +14,7 @@ from energyPATHWAYS.shared_classes import AggregateStock, SalesShare
 from energyPATHWAYS.demand_measures import ServiceDemandMeasure, EnergyEfficiencyMeasure, FuelSwitchingMeasure
 from energyPATHWAYS.demand_technologies import DemandTechnology
 from energyPATHWAYS.rollover import Rollover
+from energyPATHWAYS.error import PathwaysException
 from energyPATHWAYS.outputs import Output
 import energyPATHWAYS.helper_multiprocess as helper_multiprocess
 from energyPATHWAYS import time_series
@@ -239,7 +240,12 @@ class Demand(object):
     def output_subsector_electricity_profiles(self):
         subsector_profile_years = cfg.getParam('dod_hourly_profile_years', section='DEMAND_OUTPUT_DETAIL')
         if subsector_profile_years.lower().rstrip().lstrip() == 'all':
-            output_years = cfg.rio_years
+            if cfg.export_to_rio:
+                output_years = cfg.rio_years
+            elif cfg.export_to_macro:
+                output_years = cfg.macro_years
+            else:
+                raise PathwaysException('dod_output_hourly_profiles is true but no export format is specified in the config file')
         else:
             output_years = [int(dy.lstrip().rstrip()) for dy in subsector_profile_years.split(',')]
             output_years = [dy for dy in output_years if dy in cfg.years]
