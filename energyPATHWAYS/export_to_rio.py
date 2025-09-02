@@ -34,6 +34,7 @@ class Export(object):
     def write_all(self):
         if cfg.export_to_macro:
             self.write_demand_shapes_macro_format()
+            self.write_exo_demand_macro_format()
         if cfg.export_to_rio:
             self.write_demand_shapes()
             self.write_demand_subsector()
@@ -78,6 +79,82 @@ class Export(object):
             return cfg.rio_standard_volume_unit
         else:
             return cfg.rio_standard_energy_unit
+
+    def write_exo_demand_macro_format(self):
+        logging.info('EP2MACRO: Writing blend inputs')
+        exo_demand = self.get_blend_exo_demand()
+        exo_demand.set_index([x for x in exo_demand.columns if x!='value'],inplace=True)
+
+        def filter_exo(df):
+            if (df==0).all().all():
+                df = df.xs(df.index.get_level_values('year')[0], level='year', drop_level=False).xs(df.index.get_level_values('blend')[0], level='blend', drop_level=False)
+            else:
+                df = df.groupby(level=['blend']).filter(lambda x: x.sum()!=0)
+            return util.remove_df_levels(df, 'name')
+
+        exo_demand = exo_demand.groupby(level=['name']).apply(filter_exo)
+        exo_demand = exo_demand.reset_index()[['name', 'sector','unit', 'geography', 'gau',
+                 'interpolation_method', 'extrapolation_method','blend',
+                 'year', 'value', 'sensitivity']]
+        
+        # Create metadata for each blend
+        metadata_rows = []
+        
+        # Create a single directory for all blend files
+        exo_demand_path = os.path.join(self.base_path_macro, 'EXO_DEMAND')
+        os.makedirs(exo_demand_path, exist_ok=True)
+        
+        # Get unique blends
+        unique_blends = exo_demand['blend'].unique()
+        
+        for blend in unique_blends:
+            # Filter data for this blend
+            blend_data = exo_demand[exo_demand['blend'] == blend].copy()
+            
+            if blend_data.empty:
+                continue
+                
+            # Create time_index as a simple sequential index over years
+            unique_years = sorted(blend_data['year'].unique())
+            year_to_time_index = {year: idx + 1 for idx, year in enumerate(unique_years)}
+            blend_data['time_index'] = blend_data['year'].map(year_to_time_index)
+            
+            # Create the wide format with regions (gau) as columns
+            blend_wide = blend_data.pivot_table(
+                index=['time_index', 'year'],
+                columns='gau',
+                values='value',
+                aggfunc='sum',
+                fill_value=0
+            )
+            
+            # Reset index to get time_index and year as columns
+            blend_wide = blend_wide.reset_index()
+            
+            # Write the time series data for this blend in the same folder
+            file_name = '{}_{}.csv'.format(blend, self.scenario)
+            Output.write(blend_wide, file_name, exo_demand_path, compression=None, index=False, lower_case=True)
+            
+            # Collect metadata for this blend
+            blend_metadata = blend_data[['name', 'sector', 'unit']].drop_duplicates()
+            
+            for _, row in blend_metadata.iterrows():
+                metadata_row = {
+                    'blend': blend,
+                    'scenario': self.scenario,
+                    'name': row['name'],
+                    'sector': row['sector'],
+                    'unit': row['unit'],
+                    'num_time_periods': len(blend_wide),
+                    'file_name': file_name
+                }
+                metadata_rows.append(metadata_row)
+        
+        # Write metadata file in the same folder
+        if metadata_rows:
+            metadata_df = pd.DataFrame(metadata_rows)
+            Output.write(metadata_df, 'EXO_DEMAND_METADATA.csv', exo_demand_path, compression=None, index=False, lower_case=True)
+        
 
     def write_exo_demand(self):
         logging.info('EP2RIO: Writing blend inputs')
